@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Pudgy Redraw</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="tonconnect-ui.min.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; padding: 20px 16px 28px;
+    font: 16px/1.4 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+    background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #000);
+  }
+  .card { max-width: 420px; margin: 0 auto; text-align: center; }
+  .logo { width: 96px; height: 96px; border-radius: 24px; margin: 12px auto 16px; display: block; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .sub { color: var(--tg-theme-hint-color, #8e8e93); margin: 0 0 22px; font-size: 15px; }
+  .row {
+    display: flex; justify-content: space-between; gap: 12px; padding: 12px 14px; margin-bottom: 8px;
+    border-radius: 14px; background: var(--tg-theme-secondary-bg-color, #f1f1f4); font-size: 15px; text-align: left;
+  }
+  .row b { font-weight: 600; }
+  .row .v { color: var(--tg-theme-hint-color, #8e8e93); word-break: break-all; text-align: right; }
+  button {
+    display: block; width: 100%; height: 52px; margin-top: 14px; border: 0; border-radius: 14px;
+    font: inherit; font-weight: 600; cursor: pointer;
+    background: var(--tg-theme-button-color, #2ea6ff); color: var(--tg-theme-button-text-color, #fff);
+  }
+  button[disabled] { opacity: .55; }
+  button.ghost { background: transparent; color: var(--tg-theme-link-color, #2ea6ff); height: 44px; margin-top: 6px; }
+  .note { margin-top: 14px; font-size: 14px; color: var(--tg-theme-hint-color, #8e8e93); min-height: 20px; }
+  .err { color: var(--tg-theme-destructive-text-color, #e53935); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="card">
+  <img class="logo" src="icon.png" alt="">
+  <h1 id="title">Кошелёк</h1>
+  <p class="sub" id="sub"></p>
+
+  <div class="row" id="rowPrice" hidden><b>К оплате</b><span class="v" id="price"></span></div>
+  <div class="row" id="rowOrder" hidden><b>Счёт</b><span class="v" id="order"></span></div>
+  <div class="row" id="rowWallet" hidden><b>Кошелёк</b><span class="v" id="wallet"></span></div>
+
+  <button id="main"></button>
+  <button id="change" class="ghost" hidden>Подключить другой кошелёк</button>
+  <div class="note" id="note"></div>
+</div>
+
+<script>
+// Страница открывается из бота кнопкой и показывает стандартное окно TON Connect.
+// Режимы (параметры адреса задаёт бот):
+//   ?m=connect          — подключить кошелёк и сообщить боту его адрес;
+//   ?m=pay&o=…&to=…&a=…&pl=…&p=…  — оплатить счёт o: перевод a нанотон на адрес to с комментарием pl.
+// Ответ боту уходит через Telegram.WebApp.sendData — бот сам проверяет платёж в блокчейне.
+const tg = window.Telegram && Telegram.WebApp;
+const q = new URLSearchParams(location.search);
+const mode = q.get('m') === 'pay' ? 'pay' : 'connect';
+const $ = (id) => document.getElementById(id);
+const note = (text, bad) => { $('note').textContent = text || ''; $('note').className = 'note' + (bad ? ' err' : ''); };
+const short = (a) => a.length > 16 ? a.slice(0, 6) + '…' + a.slice(-6) : a;
+
+if (tg) { tg.ready(); tg.expand(); }
+
+const ui = new TON_CONNECT_UI.TonConnectUI({
+  manifestUrl: new URL('tonconnect-manifest.json', location.href).href,
+  language: 'ru',
+});
+if (q.get('b')) ui.uiOptions = { twaReturnUrl: 'https://t.me/' + q.get('b') };
+
+let busy = false;
+function friendly() {
+  const w = ui.wallet;
+  if (!w) return '';
+  try { return TON_CONNECT_UI.toUserFriendlyAddress(w.account.address); } catch (e) { return w.account.address; }
+}
+function send(data) {
+  if (tg && tg.sendData) tg.sendData(JSON.stringify(data));   // закрывает страницу и передаёт ответ боту
+  else note('Откройте эту страницу кнопкой из бота.', true);
+}
+
+function draw() {
+  const connected = !!ui.wallet;
+  $('rowWallet').hidden = !connected;
+  $('wallet').textContent = connected ? short(friendly()) : '';
+  $('change').hidden = !connected || busy;
+  $('main').disabled = busy;
+  if (mode === 'pay') {
+    $('title').textContent = 'Оплата счёта';
+    $('sub').textContent = 'Перерисовка стикерпака';
+    $('rowPrice').hidden = $('rowOrder').hidden = false;
+    $('price').textContent = (q.get('p') || '?') + ' TON';
+    $('order').textContent = q.get('o') || '';
+    $('main').textContent = busy ? 'Подтвердите в кошельке…' : connected ? 'Оплатить ' + (q.get('p') || '') + ' TON' : 'Выбрать кошелёк';
+  } else {
+    $('title').textContent = connected ? 'Кошелёк подключён' : 'Подключите кошелёк';
+    $('sub').textContent = connected ? 'Нажмите «Готово», чтобы вернуться в бота.' : 'Telegram, Tonkeeper, MyTonWallet и другие.';
+    $('main').textContent = connected ? 'Готово' : 'Выбрать кошелёк';
+  }
+}
+
+async function pay() {
+  busy = true; note(''); draw();
+  try {
+    await ui.sendTransaction({
+      validUntil: Math.floor(Date.now() / 1000) + 600,
+      messages: [{ address: q.get('to'), amount: q.get('a'), payload: q.get('pl') || undefined }],
+    });
+    send({ t: 'paid', o: q.get('o'), w: ui.wallet.account.address });
+  } catch (e) {
+    busy = false;
+    const m = String(e && e.message || e);
+    note(/reject|declin|cancel/i.test(m) ? 'Оплата отменена.' : 'Не получилось: ' + m, true);
+    draw();
+  }
+}
+
+$('main').onclick = () => {
+  if (busy) return;
+  if (!ui.wallet) return ui.openModal();
+  if (mode === 'pay') return pay();
+  send({ t: 'wallet', w: ui.wallet.account.address, n: ui.wallet.device && ui.wallet.device.appName });
+};
+$('change').onclick = async () => { await ui.disconnect(); draw(); ui.openModal(); };
+
+ui.onStatusChange(() => draw());
+ui.connectionRestored.then((ok) => { draw(); if (!ok) ui.openModal(); });   // кошелька нет — сразу показываем окно выбора
+draw();
+</script>
+</body>
+</html>
